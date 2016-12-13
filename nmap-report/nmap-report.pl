@@ -1,4 +1,9 @@
 #!/usr/bin/perl
+#----------------------------------------------------------------------------
+#
+#  Written by MadHat (madhat@unspecific.com)
+#    http://www.unspecific.com/nmap/report/
+#
 # Copyright (c) 2001-2002, MadHat (madhat@unspecific.com)
 # All rights reserved.
 #
@@ -11,7 +16,7 @@
 #   * Redistributions in binary form must reproduce the above copyright
 #     notice, this list of conditions and the following disclaimer in
 #     the documentation and/or other materials provided with the distribution.
-#   * Neither the name of MadHat Productions nor the names of its
+#   * Neither the name of Unspecific Consulting nor the names of its
 #     contributors may be used to endorse or promote products derived
 #     from this software without specific prior written permission.
 #
@@ -26,37 +31,54 @@
 # LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 # NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+#----------------------------------------------------------------------------
+
+# log directory where nmap-wrapper stored its log files
+$logdir = "/usr/local/var/log/nmap/";
+
+#---------------------------------------
+# Don't change anything below here
+#---------------------------------------
+$VERSION = '1.1';
 
 use POSIX "strftime";
 use Getopt::Std;
-getopts("svVp:d:b:f");
-
-$logdir = "/home/lheath/mp/nmap-logs";
+getopts("hvVl:p:d:b:f");
+if ($opt_h) {
+  &usage;
+}
+if ($opt_l) {
+  $logdir = $opt_l;
+}
 
 if ($opt_b) {
   $sdate = time - 86400 * $opt_b;
 } else {
   $sdate = time;
 }
-$scandate = strftime "%m%d%Y", localtime $sdate;
+$scandate = strftime "%Y%m%d", localtime $sdate;
 print "Searching $scandate\n" if ($opt_d);
 
-opendir(DIR, $logdir);
+opendir(DIR, $logdir) or die "ERROR: Unable to open $logdir: $!\n";
 @dir = readdir(DIR);
 close(DIR);
 
 FILE: for $file (@dir) {
   next FILE if ($file =~ /^\./);
-  if ($file =~ /^$scandate(\.\d{1,3}\.\d{1,3}\.\d{1,3}\.nmap)$/) {
+  if ($file =~ /^$scandate(\.\d{1,3}\.\d{1,3}\.\d{1,3}\.gnmap)$/) {
     $exten = $1;
+    $found++;
     print "searching $scandate$exten for open port $opt_p\n" if ($opt_d);
-    open (SCAN, "$logdir/$scandate$exten");
+    open (SCAN, "$logdir/$scandate$exten") 
+        or die "ERROR opeing file $logdir/$scandate$exten: $!";
     @scan = <SCAN>;
     close (SCAN);
     @scan = grep(!/^#/, @scan);
     LINE: for $line (@scan) {
       chomp $line;
       ($host, $ports, @ignored) = split ("\t", $line);
+      print "$ports" if ($opt_d > 2);
       ($title, $ip, $dns) = split(' ', $host);
       for (@ignored) {
         ($title, $info) = split(':', $_);
@@ -110,4 +132,38 @@ FILE: for $file (@dir) {
   } else {
     next FILE;
   }
+}
+
+if (!$found) {
+  print "No files found that matched the request.\n";
+  print "Make sure you have your log directory set properly.\n"
+}
+
+sub usage {
+  print " : nmap-report - $VERSION - MadHat (at) Unspecific.com\n";
+  print " : http://www.unspecific.com/nmap/report/\n\n";
+  print <<_EOF_;
+    nmap-report is designed to be used with the log files
+      generated from the nmap-wrapper
+
+$0 [-hsvVf] [-p <port>] [-b <days>] [-l <logdir>]
+
+  -h help (this stuff)
+  -v verbose, adds DNS and a complete report of all open ports
+     as long as -p is not used
+  -V Verbose, added  other nmap information, such as OS, Ignored ports,
+     and sequencing information where available
+  -f is used with the portscan tool and is for generating a list for 
+     fingerprinting a host.  The list will be ip:port, which portscan will 
+     accept.  nmap-report -f | portscan -v -l -
+  -p <port> to report on a specific port.  Give a list of all hosts with
+     that port open
+  -b <days> to specify the base.  Telkl it how many day ago, in the logs 
+     to check.  By default it checks todays reports.
+  -l <logdir> to specify where the log directory
+     This can be hard coded by editing the script
+
+
+_EOF_
+  exit 1;
 }

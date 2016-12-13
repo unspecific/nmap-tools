@@ -1,15 +1,13 @@
 #!/usr/bin/perl
 # 
 # nmap-search.pl
-# by madhat@unspecific.com
-# http://www.unspecific.com/nmap-search/
-#
-#
+# Written by MadHat (madhat@unspecific.com)
+# http://www.unspecific.com/nmap/search/
 #
 # Basically, this will allow you to search through a nmap -oG (grepable) 
 # file to look for specific things and reformat it for you. 
 #
-# Copyright (c) 2001-2002, MadHat (madhat@unspecific.com)
+# Copyright (c) 2001-2003, MadHat (madhat@unspecific.com)
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -21,7 +19,7 @@
 #   * Redistributions in binary form must reproduce the above copyright
 #     notice, this list of conditions and the following disclaimer in
 #     the documentation and/or other materials provided with the distribution.
-#   * Neither the name of MadHat Productions nor the names of its
+#   * Neither the name of Unspecific Consulting nor the names of its
 #     contributors may be used to endorse or promote products derived
 #     from this software without specific prior written permission.
 #
@@ -39,18 +37,26 @@
 #
 #---------------------------------------
 
+# log directory where nmap-wrapper stored its log files
+$logdir = "/usr/local/var/log/nmap";
+
+#---------------------------------------
+# Don't change anything below here
+#---------------------------------------
+$VERSION = '1.2';
+
 if (defined $ENV{'REQUEST_METHOD'}) {
   use CGI ":standard";
   use CGI::Carp "fatalsToBrowser";
   print header, start_html('NMAP Search'), "<pre>";
-  opendir (DIR, '.');
+  opendir (DIR, $logdir) or die "ERROR: Unable able to open $logdir: $!\n";
   @data = readdir(DIR);
   closedir(DIR);
   for (@data) {
-    if (/\.nmap$/) {
+    if (/\.gnmap$/) {
       ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
        $atime,$mtime,$ctime,$blksize,$blocks)
-           = stat($_);
+           = stat("$logdir/$_") or  die "ERROR: Unable able to open $_: $!\n";;
       $mtime = localtime($mtime);
       $dblabel{$_} = "$_ - $mtime";
       push(@dblist, $_);
@@ -82,7 +88,9 @@ if (defined $ENV{'REQUEST_METHOD'}) {
   getopts('f:');
 
   if (!$ARGV[1]) {
-    print "usage: $0 [-f file] <field> <search>\n\n"
+    print " : nmap-search v$VERSION - MadHat (at) Unspecific.com\n"
+      . " : http://www.unspecific.com/nmap/search/\n\n"
+      . "usage: $0 [-f file] <field> <search>\n\n"
       . "<field> The field you want to look for (OS, host, port)\n"
       . "\tmay be shortened to the shortist non-duplicated string\n"
       . "\tos may be o, host may be h, etc...\n\n"
@@ -112,7 +120,7 @@ if (defined $ENV{'REQUEST_METHOD'}) {
   }
 }
 
-open (DB, "$dbfile") or error("Can't open DB($dbfile): $!\n");
+open (DB, "$logdir/$dbfile") or error("Can't open DB($dbfile): $!\n");
 @data = <DB>;
 close (DB);
 
@@ -138,7 +146,9 @@ for (@data) {
   s/\cM//;
   my @line = split("\t");
   for my $entry (@line) {
-    ($field, $data) = split (":", $entry);
+    $entry =~ /^(\S+)\: (.+)$/;
+    $field = $1;
+    $data = $2;
     $entry{$field} = $data;
     if ($srch_search_not and !$srch_field_not) {
       if ($field =~ /^$srch_field/ig and $data !~ /$srch_search/ig) {
@@ -186,12 +196,12 @@ sub error {
 }
 
 sub search_page {
-$data = "<form method=post> <center><table>
+  $data = "<form method=post> <center><table>
 <tr><td align=right>Field:</td><td><input name=field></td></tr>
 <tr><td align=right>Search:</td><td><input name=search></td></tr>
 <tr><td align=right>DB to Search:</td><td>";
-$data .= popup_menu(-name=>nmapdb, -values=>\@dblist, -labels=>\%dblabel);
-$data .= "<tr><td colspan=2 align=center><input type=submit></td></tr></table></center>
+  $data .= popup_menu(-name=>nmapdb, -values=>\@dblist, -labels=>\%dblabel);
+  $data .= "<tr><td colspan=2 align=center><input type=submit></td></tr></table></center>
 <pre>
 <b>field</b> The field you want to look for (OS, host, port)
 	may be shortened to the shortist non-duplicated string
@@ -219,6 +229,4 @@ $data .= "<tr><td colspan=2 align=center><input type=submit></td></tr></table></
 </pre>";
 
   return($data);
-
-
 }

@@ -2,7 +2,7 @@
 #---------------------------------------
 #
 #   Writen by MadHat (madhat@unspecific.com)
-# http://www.unspecific.com/mp/http-scanner/
+# http://www.unspecific.com/
 #
 # Copyright (c) 2001-2002, MadHat (madhat@unspecific.com)
 # All rights reserved.
@@ -16,7 +16,7 @@
 #   * Redistributions in binary form must reproduce the above copyright
 #     notice, this list of conditions and the following disclaimer in
 #     the documentation and/or other materials provided with the distribution.
-#   * Neither the name of MadHat Productions nor the names of its
+#   * Neither the name of Unspecific Consulting nor the names of its
 #     contributors may be used to endorse or promote products derived
 #     from this software without specific prior written permission.
 #
@@ -34,10 +34,19 @@
 #
 #---------------------------------------
 
+# location of nmap
+my $nmap = '/usr/local/bin/nmap';
+
+# location of log file
+my $logdir = '/usr/local/var/log/nmap';
+
+# location of blacklist file
+my $blacklist = '/usr/local/etc/nmap/blacklist';
 
 #---------------------------------------
-# Don't change anything below here unless you know what you are doing.
+# Don't change anything below here
 #---------------------------------------
+my $VERSION = '1.5';
 
 use Getopt::Std;
 use Time::HiRes qw(alarm);
@@ -48,23 +57,51 @@ require v5.6.0;
 
 $SIG{CHLD}='IGNORE';
 $| = 0;
-$start_time = time;
+my $start_time = time;
 
-$nmap = '/usr/bin/nmap';
-@scan_type = ('-O', '-sT', '--datadir /home/lheath/mp', '-F');
-$output_type = '--append_output -oG';
-$output_dir = '/home/lheath/mp/nmap-logs';
-$scandate = strftime "%m%d%Y", localtime;
+my @scan_type = ('-O', '-sT', '-F');
+my $output_type = '--append-output -oA';
+my $scandate = strftime "%Y%m%d", localtime;
+
 
 #---------------------------------------
 # MAIN STUFF
 #---------------------------------------
 
-getopts("hvd:l:n:i:");
+getopts("hvd:l:L:n:i:p:o:b:");
 &scan_usage if ( defined($opt_h) );
 &scan_usage if ( !( defined($opt_i) xor defined($opt_l) ) );
 $opt_n = 10  if ( ! defined($opt_n) );
+$opt_p = "/usr/local/var/run/wrapper.pid" if ( ! defined($opt_p) );
+$logdir = $opt_L if ( defined($opt_L) );
+$blacklist = $opt_b if ( defined($opt_b) );
 
+if ($opt_o) {
+  @scan_type = ();
+  for my $opt (split(/\s\-/, $opt_o)) {
+    if ($opt =~ /^\-/) {
+      push @scan_type, $opt;
+    } else {
+      push @scan_type, "-$opt";
+    }
+  }
+}
+
+if (! -d $logdir) {
+  die "ERROR: Can't find LOGDIR: $opt_L:$!\n";
+}
+
+my @blacklist;
+
+if (-e $blacklist) {
+  open(BL, $blacklist) or die "ERROR: can't open blacklist file ($blacklist): $!\n";
+  @blacklist = <BL>;
+  close(BL);
+}
+
+open (PID, ">$opt_p") or die "ERROR: can't open PID file ($opt_p): $!\n";
+print PID "PARRENT $$ ***\n";
+close(PID);
 
 &doScan;
 while (wait != -1)  { sleep 1 };
@@ -72,6 +109,8 @@ print "\n--\nScan Finished.\n" if ($opt_v);
 $end_time = time;
 $timediff = $end_time - $start_time;
 $ipcount = $#totallist + 1;
+open (PID, ">$opt_p") or die "ERROR: can't open PID file ($opt_p): $!\n";
+close(PID);
 print "Scan of $ipcount ip(s) took $timediff seconds\n" if ($opt_v);
 
 sub doScan{
@@ -94,6 +133,13 @@ sub doScan{
   scanNet(@totallist);
 }
 
+
+sub end_proc {
+  open (PID, ">$opt_p") or die "ERROR: can't open PID file ($opt_p): $!\n";
+  close(PID);
+  kill 9, $$;
+}
+
 sub scanNet{
   my @iplist = @_;
   if (!@iplist) { die "Error in the IP list. Check syntax.
@@ -110,18 +156,31 @@ sub scanNet{
   \n"; }
   my $prnt=1;  # 
   my @CHILDREN;
+  my %CHILDREN;
   for ( $i = 0; $i<=$#iplist; $i++ ){
     my $ipaddr = $iplist[$i];
     chomp $ipaddr;
+    if (grep(/^$ipaddr$/, @blacklist)) {
+      print "- DEBUG ($$): Skipping $ipaddr - BLACKLISTED\n" 
+        if ($opt_d);
+      next;
+    }
     WAIT: while ( $#CHILDREN >= $opt_n ){
       print "- DEBUG ($$): Parent waiting to start #$i of " .
         ($#iplist + 1) . " ($#CHILDREN Running)\n" 
         if ($opt_d);
+      open (PID, ">$opt_p") or die "ERROR: can't open PID file ($opt_p): $!\n";
+      print PID "WRAPPER $$\n";
+      for my $chpid (keys %CHILDREN) {
+        print PID "CHILD $chpid " . $CHILDREN{$chpid} . "\n";
+      }
+      close (PID);
       my $CHILD_pos = 0;
-      for $pid (@CHILDREN) {
+      for my $pid (@CHILDREN) {
         $waitpid = waitpid($pid, WNOHANG);
         if ($waitpid != 0) {
           splice(@CHILDREN, $CHILD_pos, 1);
+	  delete $CHILDREN{$pid};
           kill 9, $pid;
           next WAIT;
         }
@@ -138,35 +197,48 @@ sub scanNet{
         $0 = "nmap-scanning $ipaddr";
         $ipaddr =~ /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/;
         $subnet = $1;
-        print "Scanning $ipaddr, output to $output_dir/$subnet.nmap\n" 
+        print "Scanning $ipaddr, output to $logdir/$subnet\n" 
           if ($opt_d);
-        push(@scan_type, "$output_type $output_dir/$scandate.$subnet.nmap", $ipaddr);
-        $rc = `$nmap @scan_type 2>/dev/null`;
+        push(@scan_type, "$output_type $logdir/$scandate.$subnet", $ipaddr, '2>/dev/null');
+	print STDERR "Starting $nmap @scan_type\n" if $opt_d > 3;
+        
+        $rc = `$nmap @scan_type`;
         #################################################
         exit 0 unless ($#iplist == 0);
       } else {
         # parent
+        $SIG{INT}=\&end_proc;
         $prnt=1;
         print "- DEBUG ($$): This is the Parent for pid $thisthread scanning $ipaddr\n" 
           if ($opt_d > 1);
         push ( @CHILDREN, $thisthread);
+	$CHILDREN{$thisthread} = $ipaddr;
       }
     }
   }
 }
 
 sub scan_usage{
-  print "\n : nmap-wrapper v$version - MadHat (at) Unspecific.com\n";
-  print " : http://www.unspecific.com/scanner\n\n";
+  print "\n : nmap-wrapper v$VERSION - MadHat (at) Unspecific.com\n";
+  print " : http://www.unspecific.com/nmap/wrapper/\n\n";
   print "$0 < -hav > -i <filename> |  -l <host_list> \\
-         [ -n <num_children>]
-         [ -d <debug_level>]\noptions:\n";
+         [ -n <num_children>] [-p <pid_file> ] [ -o \"<nmap options>\" ] \\
+	 [ -L <log_dir> ] [-b blacklist]
+         options:\n";
   print "  -h   help (this stuff)\n";
   print "  -v   verbose - will add details\n";
-  print "  -d   add debuging info (value 1-3)\n";
   print "  -l   network list in comma delimited form: a.b.c.d/M,e.f.g.h/x.y.z.M\n";
   print "  -i   input file containing network list, one network per line\n";
   print "  -n   max number of children to fork\n";
+  print "  -o   nmap options to send to each child process\n";
+  print "         it is expecting the \"\" around the options\n";
+  print "         Default Options:  -O -sT -F\n";
+  print "  -p   PID file, lists the currently running processes and their state\n";
+  print "        default location is /usr/local/var/run/wrapper.pid\n";
+  print "  -L   Log file dir.  This is where scan results are stored\n";
+  print "        default location is /usr/local/var/log/wrapper/\n";
+  print "  -b   blacklist.  file that contains a list of IPs to NOT scan\n";
+  print "        default location is /usr/local/etc/nmap/blacklist\n";
   exit 0;
 }
 

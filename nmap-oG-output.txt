@@ -1,0 +1,556 @@
+Nmap's Grepable Output
+by Lee Heath <madhat@unspecific.com> (c) 2001
+
+One of the often overlooked and underused output methods of nmap is the 
+grepable or "machine" output.   This output places all results for a 
+single host on a single line, making it easier to use with other command 
+line tools, like grep and awk. It also makes it easier to use when
+scripting.
+
+One problem with this format is that it is not well documented and
+therefore not well understood.  I hope to address this issue.
+
+The man pages state:
+
+  -oG <log filename>
+     This logs the results of your scans in a grepable form into  the
+     file  you  specify  as an argument.  This simple format provides
+     all the information on one line (so you can easily grep for port
+     or OS information and see all the IPs.  This used to be the pre-
+     ferred mechanism for programs to interact with Nmap, but now  we
+     recommend  XML output (-oX instead).  This simple format may not
+     contain as much information as the other formats.  You can  give
+     the  argument  "-"  (without quotes) to shoot output into stdout
+     (for shell pipelines, etc).  In this case normal output will  be
+     suppressed.   Watch out for error messages if you use this (they
+     will still go to stderr).  Also note that "-v" will  cause  some
+     extra information to be printed.
+
+Unfortunately, the documentation stops there.
+
+Most of the information returned by the normal output or XML output is 
+included with the grepable output, and as of version 3.49 of nmap, 
+Version scanning is included in the grepable output.
+
+
+The first example is a basic scan using all the defaults, except output.
+
+
+$ nmap -oG - insecure.org
+# nmap 3.48 scan initiated Thu Dec 11 10:51:45 2003 as: nmap -oG - insecure.org 
+Host: 205.217.153.53 ()
+Ports: 22/open/tcp//ssh///,
+ 25/open/tcp//smtp///,
+ 53/open/tcp//domain///,
+ 80/open/tcp//http///,
+ 113/closed/tcp//auth///
+Ignored State: filtered (1652)
+# Nmap run completed at Thu Dec 11 10:52:51 2003 -- 1 IP address (1 host up) scanned in 66.544 seconds
+
+
+The command line option used here was the -oG for grepable output, but I 
+sent it to STDOUT by using the -  option, rather than to a file.
+
+I stated that there was one line per host, but on a simple run such as
+this, there are also 2 comment style lines. The first one notes what
+command was used to launch nmap, and the version, date and time started.
+The second one is at the end and tells the date and time that the scan
+finished, how long the scan took, and the number of hosts up.  This
+reflects the basic information included in the standard output as well.
+
+
+Looking at the line that contains the data we want to examine, we have:
+
+Host: 205.217.153.53 () 
+Ports: 22/open/tcp//ssh///,
+ 25/open/tcp//smtp///,
+ 53/open/tcp//domain///,
+ 80/open/tcp//http///,
+ 113/closed/tcp//auth/// 
+Ignored State: filtered (1652)
+
+
+We have Section Defining Tags, in this case Host, Ports, and Ignored
+State.  These sections are separated with tabs (\t).  We can use a split
+function, such as the one in Perl, to be able to work with each one of
+these fields.  An example in Perl might look like:
+
+@fields = split("\t", $nmap_output);
+
+We now have three items in an array.   These items would be:
+
+Host: 205.217.153.53 ()
+Ports: 22/open/tcp//ssh///,
+ 25/open/tcp//smtp///,
+ 53/open/tcp//domain///,
+ 80/open/tcp//http///,
+ 113/closed/tcp//auth///
+Ignored State: filtered (1652)
+
+
+Using this same concept, we can split on the colon (:) to generate a 
+key-value pair consisting of the field name and value assigned to that
+field.
+
+The Host entry only has 2 fields, space separated.  This is the IP and
+the DNS entry for that IP address.   In this case there is no reverse
+entry for DNS.
+
+The second field in a basic scan is Ports.  Ports is a comma separated
+list of ports.  Each entry within this comma separated list is divided
+into 7 sections, but not all are used for a basic scan.  These sections
+are separated by a forward slash (/).  The fields are:
+
+port number / state / protocol / owner / service / rpc info / version info
+
+
+-   port number:
+     The port number this entry is related to
+
+-   state:
+     open, closed or filtered.
+     Depending on the scan type, the exact meaning and determination can 
+     change slightly for each of these, but the basic idea is that open
+     means that the target machine will accept connetions on that port.
+
+     closed means that as far as nmap can tell there is nothing blocking
+     the port, but the device is not accepting connections.
+
+     filtered means that some method was used to keep nmap from being able
+     to determie whether or not the port is open.  This is often done with
+     firewalls or network filters.
+
+     An exaple of of these, looking at a SYN scan, would be that for open
+     to be the state a SYN/ACK would be returned for our SYN sent. closed
+     would be reported by nmap when a RST (reset) packet would be returned
+     and filtered would show up as the state when either nothing was
+     returned, and and we assume that a firewall dropped the request, or
+     an ICMP port unreachable message was returned.
+
+     More details can be found in the man pages or at
+     http:///www.insecure.org/nmap/
+
+-   protocol:
+     The protocol associated with the port, usually tcp or udp.
+
+-   owner:
+     This field will have the user running an app if a few requirements are 
+     fulfilled.  First, you must specify to include a reverse ident scan (-I)
+     and identd must be running on the remote host and be available.  Keep 
+     in mind that identd can be set to return any info the administrator 
+     wants, so don't trust the data.
+
+-   service:
+     By default the service is going to be the name related to the port via 
+     the nmap-services file. If version scanning is used (-sV), this field 
+     will be populated with the service detected by the probe.  In some cases 
+     the entry may be compound such as "ssl|http" or you may see a common 
+     service name with a trailing question mark.  
+
+     Details on the Nmap version detection are available at
+       http://www.insecure.org/nmap/versionscan.html
+
+-   rpc info:
+     RPC info is similar to the owner field in that it is only filled in 
+     with two requirements are met.  Once again the scan has to be enabled 
+     via the RCP scan (-sR) that will gain the info the same way 'rpcinfo -p' 
+     does. This also means that the rpcbind, portmapper has to be running 
+     on the host being scanned.
+
+-   version info:
+     This field will also be empty unless the specific scan type is 
+     requested. Including the version scan (-sV) will fill this field if 
+     nmap is able to determine what is running on the port.  This is also 
+     detailed at http://www.insecure.org/nmap/versionscan.html. 
+     We will look at this in more detail below.
+
+
+Using the same concept as above we can show that with split we could access 
+these fields easily.  
+
+($port, $state, $protocol, $owner, $service, $rpc_info, $version) = split('/', $ports); 
+
+
+The last field in the basic scan is the "Ignored State" which tells which
+state was ignored and how many entries (ports) were associated with that 
+state.  In this example there are 1652 ports filtered that were scanned.
+
+An example of how to use the grepable output on the command line is to
+pipe the output to something like awk to find all hosts that have a
+particular port open.  For example, if we want to know all the hosts
+with port 80 open on a subnet but all we want to see if the IP, we can
+use something like this:
+
+
+$ nmap -p80 -PS80 -oG - 10.1.1.0/24 | awk '/open/{print $2}'
+10.1.1.72
+10.1.1.73
+10.1.1.75
+10.1.1.149
+10.1.1.152
+10.1.1.160
+10.1.1.161
+10.1.1.201
+10.1.1.254
+
+
+The -p80 states to scan for port 80.  -PS80 means to use a SYN Ping
+method to see if the host is up.  This will speed up the scan greatly
+because it will not scan twice, as it normally would, with the first
+being to see if the host is up and then scanning to see if the port is
+open.  Nmap is smart enough to know that it has already tested that port
+with the SYN Ping.  We also send the grepable output to STDOUT with -oG -
+and then pipe that to awk.  The awk command is running this simple
+script, where /open/ matches on the test open (same as going a 'grep
+open') and the prints the second field breaking the output on spaces.
+If we wanted to include the domain name, we could use this:
+
+
+$ nmap -p80 -PS80 -oG - 10.1.1.0/24 | awk '/open/{print $2 " " $3}'
+10.1.1.72 (userA.corp.foocompany.biz)
+10.1.1.73 (userB.corp.foocompany.biz)
+10.1.1.75 (userC.corp.foocompany.biz)
+10.1.1.149 (admin.corp.foocompany.biz)
+10.1.1.152 (printer.corp.foocompany.biz)
+10.1.1.160 (10-1-1-160.foocompany.biz)
+10.1.1.161 (10-1-1-161.foocompany.biz)
+10.1.1.201 (10-1-1-201.foocompany.biz)
+10.1.1.254 (10-1-1-254.foocompany.biz)
+
+This is where we grab the second and third field from each line.
+
+
+
+Now if we look at some other examples and other scanning options we can
+see the basic formatting does not change, and makes it fairly easy to
+parse with scripts or other applications.
+
+If we turn on verbose logging we have more "comment" lines added.  
+
+$ sudo nmap -v -oG - 10.1.1.100
+# nmap 3.48BETA1 scan initiated Thu Dec 11 15:03:01 2003 as: nmap -v -oG - 10.1.1.100 
+# Ports scanned: TCP(1657;1-1027,1029-1033,...,61439-61441,65301) UDP(0;) PROTOCOLS(0;)
+Host: 10.1.1.100 (devbox.corp.foocompany.biz) 
+Ports: 80/open/tcp//http///,
+ 135/open/tcp//msrpc///,
+ 139/open/tcp//netbios-ssn///,
+ 443/open/tcp//https///,
+ 445/open/tcp//microsoft-ds///,
+ 1025/open/tcp//NFS-or-IIS///,
+ 2105/open/tcp//eklogin///,
+ 3389/open/tcp//ms-term-serv///  
+Ignored State: closed (1638)
+# Nmap run completed at Thu Dec 11 15:03:09 2003 -- 1 IP address (1 host up) scanned in 7.668 seconds
+
+
+We can see that we now have a line (that I shortened) that has
+information about what ports were scanned.  Specifically it tell us that
+1657 TCP ports were scanned, and then a semicolon (;), then a list of
+the ports.  It also tells us that we did not scan any UDP ports and no
+extra protocols.
+
+At this time adding more verbose tags on the command line (-vvv) does
+not further change the grepable output.
+
+If we add the OS Detection to the scan, we see results like this:
+
+$ sudo nmap -O -oG - 10.1.1.100
+# nmap 3.48BETA1 scan initiated Thu Dec 11 15:15:00 2003 as: nmap -O -oG - 10.1.1.100 
+Host: 10.1.1.100 (devbox.corp.foocorp.biz)  
+Ports: 80/open/tcp//http///,
+ 135/open/tcp//msrpc///,
+ 139/open/tcp//netbios-ssn///,
+ 443/open/tcp//https///,
+ 445/open/tcp//microsoft-ds///,
+ 1025/open/tcp//NFS-or-IIS///,
+ 2105/open/tcp//eklogin///,
+ 3389/open/tcp//ms-term-serv///  
+Ignored State: closed (1638)    
+OS: Microsoft Windows Millennium Edition (Me),
+  Windows 2000 Professional or Advanced Server, 
+  or Windows XP|Microsoft Windows XP SP1
+Seq Index: 22972
+IPID Seq: Incremental
+# Nmap run completed at Thu Dec 11 15:15:48 2003 -- 1 IP address (1 host up) scanned in 47.921 seconds
+
+
+Once again we have our main sections of the output tab delimited (\t).
+Adding the OS Fingerprinting added a few new fields.  Specifically we
+see:
+
+OS: Microsoft Windows Millennium Edition (Me), Windows 2000 Professional or Advanced Server, or Windows XP|Microsoft Windows XP SP1 
+Seq Index: 22972 
+IPID Seq: Incremental
+
+
+Each of these fields is in the same key/value format as before, being
+separated by a colon (:).  As of this writing nmap grepable output does
+not support the "Device Type" or "Running" fields as returned from the
+standard or XML output.
+
+The IPID and Seq Index only show up on the standard output with verbose
+(-v) turned on with OS detection.
+
+The OS field is equivalent to the "OS details" from the standard and XML
+output which gives you the best guesses for the OS from the fingerprint
+when possible.
+
+Specifically the IPID Seq field is the IP Sequence Generation field from
+standard output which will tell how the IPIDs are generated by the host.
+Examples are Incremental, Randomized, Random positive increments, etc.
+This value will help determine how vulnerable the host might be to
+certain types of attacks and information gathering tactics.
+
+The Seq Index field is the difficulty rating to predict the next TCP
+sequence number.  In the normal output we have some key terms to help
+read this number, but the basic idea is that the higher the number the
+harder it is to guess the next TCP sequence number in the TCP header.
+
+
+        Seq < 10    - Trivial Joke
+   11 < Seq < 80    - Easy
+   81 < Seq < 3000  - Medium Difficulty
+ 3001 < Seq < 5000  - Formidable
+ 5001 < Seq < 10000 - Worthy challenge
+10001 < Seq         - "Good Luck!"
+
+
+Taking a step back and looking at simple scans, such as a ping scan, we
+can see that the basic format is the same, still tab (\t) delimited
+entries:
+
+
+$ sudo nmap  -oG - -sP 10.1.1.172/29
+# nmap 3.48BETA1 scan initiated Thu Dec 11 15:49:17 2003 as: nmap -oG - -sP 10.1.1.168/29 
+Host: 10.1.1.168 (alice.corp.foocorp.biz)     Status: Up
+Host: 10.1.1.169 (madhat-sun.corp.foocorp.biz) Status: Up
+Host: 10.1.1.170 (madhat.corp.foocorp.biz)     Status: Up
+Host: 10.1.1.171 (madhat-laptop.corp.foocorp.biz)      Status: Up
+Host: 10.1.1.172 (iss-scanner.dal.foocorp.biz)        Status: Up
+Host: 10.1.1.173 (hatta.corp.foocorp.biz)      Status: Up
+# Nmap run completed at Thu Dec 11 15:49:19 2003 -- 8 IP addresses (6 hosts up) scanned in 1.242 seconds
+
+
+Once again we can split on the tab (\t) to get the 2 fields returned
+here.  Each one returned is in the key/value pair format, using the
+colon (:) delimiter.
+
+Adding a -v to this scan will show both up and down hosts, with only the
+Status field changing.  The same output is used for the List scan (-sL)
+that only does a lookup on the IPs.  The only difference is that it does
+not try to contact the hosts at all and only does a DNS lookup for each
+IP and the Status is reported as Unknown.
+
+An example can be found here:
+
+
+$ sudo nmap  -oG - -sL 10.1.1.172/29
+# nmap 3.48BETA1 scan initiated Thu Dec 11 15:49:17 2003 as: nmap -oG - -sP 10.1.1.168/29 
+Host: 10.1.1.168 (alice.corp.foocorp.biz)     Status: Unknown
+Host: 10.1.1.169 (madhat-sun.corp.foocorp.biz) Status: Unknown
+Host: 10.1.1.170 (madhat.corp.foocorp.biz)     Status: Unknown
+Host: 10.1.1.171 (madhat-laptop.corp.foocorp.biz)      Status: Unknown
+Host: 10.1.1.172 (iss-scanner.dal.foocorp.biz)        Status: Unknown
+Host: 10.1.1.173 (hatta.corp.foocorp.biz)      Status: Unknown
+Host: 10.1.1.174 ()      Status: Unknown
+Host: 10.1.1.175 ()      Status: Unknown
+# Nmap run completed at Thu Dec 11 15:49:19 2003 -- 8 IP addresses (6 hosts up) scanned in 1.242 seconds
+
+
+Looking at the RPC scan (-sR) we can fill in another one of the fields
+available in each of the port indicators.  Here is an example of using
+the RPC scan with RPC running on the box:
+
+$ sudo nmap -oG - -p21-25,80,111,443,4045,32774 -sR -T4 box.foocorp.biz
+# nmap 3.48BETA1 scan initiated Tue Dec 16 16:37:18 2003 as: nmap -oG - -p21-25,80,111,443,4045,32774 -sR -T4 box.foocorp.biz
+Host: 10.1.1.146 (box.foocorp.biz)
+Ports: 21/open/tcp//ftp/N//,
+  22/open/tcp//ssh/N//,
+  23/closed/tcp//telnet///,
+  24/closed/tcp//priv-mail///,
+  25/open/tcp//smtp/N//,
+  80/closed/tcp//http///,
+  111/open/tcp//rpcbind/(rpcbind:100000*2-4)/2-4 (rpc #100000)/,
+  443/closed/tcp//https///,
+  4045/open/tcp//nlockmgr/(nlockmgr:100021*1-4)/1-4 (rpc #100021)/,
+  32774/open/tcp//sometimes-rpc11/N//
+# Nmap run completed at Tue Dec 16 16:37:18 2003 -- 1 IP address (1 host up) scanned in 0.490 seconds
+
+
+For this example we are only looking at the ports section of the output:
+
+Ports: 21/open/tcp//ftp/N//,
+ 22/open/tcp//ssh/N//,
+ 23/closed/tcp//telnet///,
+ 24/closed/tcp//priv-mail///,
+ 25/open/tcp//smtp/N//,
+ 80/closed/tcp//http///,
+ 111/open/tcp//rpcbind/(rpcbind:100000*2-4)/2-4 (rpc #100000)/,
+ 443/closed/tcp//https///,
+ 4045/open/tcp//nlockmgr/(nlockmgr:100021*1-4)/1-4 (rpc #100021)/,
+ 32774/open/tcp//sometimes-rpc11/N//
+
+
+Each port's information is separated by a comma (,), and each field
+within the port's data is separated by a forward slash (/).  Looking at
+the fields again, we have port number, state, protocol, and user, which
+will be discussed later, and RPC information and version information.
+
+The RPC information is filled in by running queries on the remote host
+equivalent to rpcinfo -p <host>.  In this case we can see that many of
+ports that are open are reporting 'N' as its RPC information, which
+means that it is not an RPC process listening.  Looking at the example
+of port 111, rpcbind:
+
+111/open/tcp//rpcbind/(rpcbind:100000*2-4)/2-4 (rpc #100000)/
+
+
+In this example we have TCP port 111 open.  TCP port 111 is labeled as
+rpcbind in the nmap-services file and is reported as such here.  The
+sixth field denotes the name, in this case again rpcbind, the RPC
+program number, the low version number of the RPC program found on that
+port and the high version of the RPC program found on that port.  The
+data returned is always returned with parenthesis and in the format:
+
+<name> : <program> * <low> - <high>
+
+The last field is the version information field and prints the same
+information, but in a different format.  It only includes the low and
+high versions found and the RPC program number.  The format is:
+
+<low> - <high> (rpc #<program>)
+
+Looking at rpcinfo output from the same host:
+
+$ rpcinfo -p box.foocorp.biz
+   program vers proto   port
+    100000    4   tcp    111  portmapper
+    100000    3   tcp    111  portmapper
+    100000    2   tcp    111  portmapper
+    100000    4   udp    111  portmapper
+    100000    3   udp    111  portmapper
+    100000    2   udp    111  portmapper
+
+We can combine all this information to match what nmap has reported,
+minus the name mapping in the last field.  We have the program number
+100000.  Lowest version shown is 2 and the highest is 4.
+
+Another option in nmap is to do a protocol scan, to see what protocols
+are supported on a host.  This scan can not be combined with other scan
+types at this time.
+
+Here is our example of this scan type:
+
+$ sudo nmap -oG - -sO madhat-laptop.corp
+# nmap 3.47 scan initiated Wed Dec 17 10:35:00 2003 as: nmap -oG - -sO madhat-laptop.corp 
+Host: 10.1.1.171 (madhat-laptop.corp.foocorp.biz)
+Protocols: 1/open/icmp/,
+   2/open/igmp/,
+   6/open/tcp/,
+   17/open/udp/,
+   255/open//
+Ignored State: closed (251)
+# Nmap run completed at Wed Dec 17 10:35:04 2003 -- 1 IP address (1 host up) scanned in 3.750 seconds
+
+
+Looking at the output we see it is very similar to other scan type
+outputs, with the sections still tab (\t) separate, except that here
+instead of a "Ports" section, we have a "Protocols" section.  Within
+this section the format is similar to that of the Ports, but shorter.
+We have 3 fields, protocol ID, state and name.  In our example protocol
+1 is open and known as ICMP.  The names are started in /etc/protocols or
+nmap-protocols.  There are 256 protocols, so we can see that we had 251
+in the Ignored State of closed and 5 open.
+
+Reverse ident scanning (-I), using the ident protocol, only works with
+TCP connect scans (-sT).  You will actually get an error that it is
+being ignored when writing to a file or using standard output.  The
+fourth field in the ports was mentioned earlier as being the "owner" as
+noted by an Ident scan.  Here is an example:
+
+$ nmap -oG - -T4 -sT -I madhat.corp
+# nmap 3.47 scan initiated Wed Dec 17 11:02:59 2003 as: nmap -oG - -T4 -sT -I madhat.corp 
+Host: 10.1.1.170 (madhat.corp.foocorp.biz)
+Ports: 22/open/tcp/root/ssh///,
+   111/open/tcp/rpc/rpcbind///,
+   113/open/tcp/ident/auth///,
+   3306/open/tcp/mysql/mysql///,
+   6000/open/tcp/root/X11///
+Ignored State: closed (1652)
+# Nmap run completed at Wed Dec 17 11:03:00 2003 -- 1 IP address (1 host up) scanned in 0.701 seconds
+
+
+Also mentioned before is the fact we can not truly trust this
+information, as many people do not run an identd server anymore or use
+it to report specific user names for IRC or other apps.  The format has
+not changed; a new field was filled in.  In this example we can see that
+the app that is listening on 22 is running as root, the app on 3306 is
+running as mysql and the app running on 113 is running as ident.
+
+As of version 3.49 of nmap Version Scanning is included in the grepable
+output.  If we look at an example:
+
+
+$ nmap -oG - -T4 -sTV madhat.corp
+# nmap 3.48BETA1 scan initiated Wed Dec 17 11:43:09 2003 as: nmap -oG - -T4 -sTV madhat.corp 
+Host: 10.1.1.170 (madhat.corp.foocorp.biz)
+Ports: 
+  22/open/tcp//ssh//OpenSSH 3.1p1 (protocol 1.99)/, 
+  80/open/tcp//http//Apache httpd 1.3.27 ((Unix)  (Red-Hat|Linux) mod_ssl|2.8.12 OpenSSL|0.9.6 PHP|4.1.2 mod_perl|1.24_01)/, 
+  111/open/tcp//rpcbind//2 (rpc #100000)/, 
+  113/open/tcp//ident//OpenBSD identd/, 
+  443/open/tcp//ssl|http//Apache httpd 1.3.27 ((Unix)  (Red-Hat|Linux) mod_ssl|2.8.12 OpenSSL|0.9.6 PHP|4.1.2 mod_perl|1.24_01)/, 
+  3306/open/tcp//mysql//MySQL 3.23.55/, 
+  6000/open/tcp//X11//(access denied)/
+Ignored State: closed (1650)
+# Nmap run completed at Wed Dec 17 11:43:19 2003 -- 1 IP address (1 host up) scanned in 10.689 seconds
+
+
+
+Once again the output is basically the same as we have seen before, but
+we add the last, seventh, field in the Ports section.  This field, as
+noted before, contains the version information.  Details on how the
+version of an app is determined can be found at:<br>
+http://www.insecure.org/nmap/versionscan.html
+
+We first listen for a response.  Based on what we receive or don't
+receive, we send predefined queries to elicit a response that will help
+us determine what is running on that port.
+
+If we look at this example closer we can see that we have port 22 open,
+and it is running OpenSSH 3.1p1 (protocol 1.99).  Looking at port 80, we
+have Apache httpd 1.3.27 ((Unix) (Red-Hat|Linux) mod_ssl|2.8.12
+OpenSSL|0.9.6 PHP|4.1.2 mod_perl|1.24_01), which points out an important
+change in the grepable output from the standard or XML output.  Because
+the grepable output uses the forward slash (/) as a delimiter the
+forward slash in the version information had to be escaped or changed.
+The final decision was to change it to a pipe (|) for ease of scripting
+or piping to another application.  In the same way that standard output
+puts ssl/ in front of the service field when SSL is detected by a
+version scan, the grepable output also denotes SSLified ports but again
+uses the | as the delimiter, so as to not interfere with the existing
+formatting.
+
+ 443/open/tcp//ssl|http//Apache httpd 1.3.27 ((Unix) (Red-Hat|Linux) mod_ssl|2.8.12 OpenSSL|0.9.6 PHP|4.1.2 mod_perl|1.24_01)/,
+
+
+In our example from above we can see an example of both of these
+substitutions in the HTTPS port 443.  The service name is ssl|http,
+denoting that the HTTP protocol is being used behind SSL.  When the
+version information is returned in the format, everything outside of the
+parenthesis is the primary information consisting of the server and the
+version, when possible, and the data within the parenthesis is
+considered extra information gathered from the host. In the information
+in this example, we can see that the extra information returned by nmap
+about the version includes RedHat|Linux, meaning that what was return or
+normally displayed would be RedHat/Linux.
+
+Once again more details on Version scanning with nmap can be found at:<br>
+   http://www.insecure.org/nmap/versionscan.html
+
+Keep in mind that the default for -oG grepable output is to specify a
+file to write to, and when doing this, the standard output will be shown
+on STDOUT and the data show above will be written to the file.
+
+Some examples on how to use the grepable output can be found at:<br>
+   http://www.unspecific.com/nmap/
